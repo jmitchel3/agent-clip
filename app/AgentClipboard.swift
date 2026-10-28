@@ -1178,8 +1178,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             item.target = self
             item.tag = row.id
             item.state = row.copied ? .on : .off
-            if !note.isEmpty, #available(macOS 14.4, *) { item.subtitle = note }
-            item.toolTip = (note.isEmpty ? "" : note + "\n\n") + cmd
+            let when = row.age == "now" ? "just now" : row.age + " ago"
+            if #available(macOS 14.4, *) {
+                item.subtitle = note.isEmpty ? when : "\(when) · \(note)"
+            }
+            item.toolTip = (note.isEmpty ? "" : note + "\n\n") + cmd + "\n\nQueued " + when
             menu.addItem(item)
 
             let alt = NSMenuItem(title: "Archive: " + preview(cmd), action: #selector(archiveClip(_:)), keyEquivalent: "")
