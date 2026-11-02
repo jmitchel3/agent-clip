@@ -70,5 +70,5 @@ echo "installed: $APP, $BIN_DIR/agent-clip"
 
 # Herdr users get the in-terminal picker and panel as a plugin (linked to this checkout).
 if command -v herdr >/dev/null; then
-  herdr plugin link "$ROOT/herdr" >/dev/null && echo "linked herdr plugin: agent-clipboard"
+  herdr plugin link "$ROOT/herdr" >/dev/null && echo "linked herdr plugin: agent-clip"
 fi

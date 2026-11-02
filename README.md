@@ -53,15 +53,15 @@ Bind it in `~/.config/herdr/config.toml`:
 [[keys.command]]
 key = "prefix+y"
 type = "plugin_action"
-command = "agent-clipboard.pick"     # popup; closes after ↩
+command = "agent-clip.pick"     # popup; closes after ↩
 
 [[keys.command]]
 key = "prefix+shift+y"
 type = "plugin_action"
-command = "agent-clipboard.panel"    # docked split that stays open
+command = "agent-clip.panel"    # docked split that stays open
 ```
 
-The docked panel types into the pane that was focused when you opened it, and updates live as agents queue commands. Keys: `↩` insert, `⌥↩` or `^x` archive, `^y` copy instead, `tab` / `←` `→` switch project, `esc` close the popup (clear the search in the panel), `^c` close. Without the keybindings, run `herdr plugin action invoke agent-clipboard.pick`.
+The docked panel types into the pane that was focused when you opened it, and updates live as agents queue commands. Keys: `↩` insert, `⌥↩` or `^x` archive, `^y` copy instead, `tab` / `←` `→` switch project, `esc` close the popup (clear the search in the panel), `^c` close. Without the keybindings, run `herdr plugin action invoke agent-clip.pick`.
 
 To show how many commands are waiting in each space, add the `$clips` token to the sidebar rows:
 
@@ -157,6 +157,6 @@ Repeated command shapes (alias / script candidates):
 ```bash
 launchctl bootout gui/$(id -u)/com.agent-clip
 rm -rf ~/Applications/"Agent Clip.app" ~/Library/LaunchAgents/com.agent-clip.plist ~/.local/bin/agent-clip
-herdr plugin uninstall agent-clipboard   # if you use herdr
+herdr plugin uninstall agent-clip   # if you use herdr
 rm -rf ~/.agent-clip   # your clip history
 ```

@@ -3,6 +3,6 @@
 set -e
 herdr="${HERDR_BIN_PATH:-herdr}"
 case "$1" in
-  panel) exec "$herdr" plugin pane open --plugin agent-clipboard --entrypoint panel --direction right ;;
-  *) exec "$herdr" plugin pane open --plugin agent-clipboard --entrypoint picker ;;
+  panel) exec "$herdr" plugin pane open --plugin agent-clip --entrypoint panel --direction right ;;
+  *) exec "$herdr" plugin pane open --plugin agent-clip --entrypoint picker ;;
 esac

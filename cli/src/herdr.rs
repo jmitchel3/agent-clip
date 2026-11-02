@@ -12,7 +12,7 @@ use std::os::unix::net::UnixStream;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
-const SOURCE: &str = "agent-clipboard";
+const SOURCE: &str = "agent-clip";
 
 /// `$HERDR_SOCKET_PATH` inside herdr, else the default session's socket if one is listening.
 fn socket() -> Option<PathBuf> {

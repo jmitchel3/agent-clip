@@ -1,5 +1,5 @@
-id = "agent-clipboard"
-name = "Agent Clipboard"
+id = "agent-clip"
+name = "Agent Clip"
 version = "0.1.0"
 min_herdr_version = "0.7.4"
 description = "Pick a command your agents queued and type it into the focused pane"
@@ -13,14 +13,14 @@ command = ["sh", "open.sh", "picker"]
 
 [[actions]]
 id = "panel"
-title = "Dock the agent clipboard panel"
+title = "Dock the agent-clip panel"
 contexts = ["workspace", "tab", "pane"]
 command = ["sh", "open.sh", "panel"]
 
 # Popup over the layout; closes after ↩.
 [[panes]]
 id = "picker"
-title = "Agent Clipboard"
+title = "Agent Clip"
 placement = "popup"
 width = "80%"
 height = "70%"
