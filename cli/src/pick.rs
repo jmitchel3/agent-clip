@@ -4,12 +4,12 @@
 //! (fzf style, `cmd=$(agent-clip pick)`). With `--to-pane` it is typed into a Herdr pane instead,
 //! and `--keep` leaves the picker open afterwards so it can live in a docked split.
 
+use super::herdr;
 use super::{detect_project, die, lock, parse, paths, pbcopy, py_strip, visible, Store, PROJECT};
-use serde_json::{json, Value};
+use serde_json::Value;
 use std::fs::{self, File, OpenOptions};
-use std::io::{BufRead, BufReader, Read, Write};
+use std::io::{Read, Write};
 use std::os::unix::io::AsRawFd;
-use std::os::unix::net::UnixStream;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant, SystemTime};
 
@@ -422,72 +422,32 @@ fn mtime(p: &Path) -> Option<SystemTime> {
 
 /// Records a use of clip `id` and returns its command, re-reading the store under the lock.
 fn take(id: i64) -> Option<String> {
-    let p = paths();
-    let _lock = lock(&p);
-    let mut s = Store::load(&p);
-    let i = s.clips().find(|(_, c)| c.id() == id).map(|(i, _)| i)?;
-    s.record_copy(i);
-    s.save(&p);
-    Some(s.clip(i).cmd().to_string())
+    let cmd = {
+        let p = paths();
+        let _lock = lock(&p);
+        let mut s = Store::load(&p);
+        let i = s.clips().find(|(_, c)| c.id() == id).map(|(i, _)| i)?;
+        s.record_copy(i);
+        s.save(&p);
+        s.clip(i).cmd().to_string()
+    };
+    let _ = herdr::sync();
+    Some(cmd)
 }
 
 fn archive(id: i64) {
-    let p = paths();
-    let _lock = lock(&p);
-    let mut s = Store::load(&p);
-    let found = s.clips().find(|(_, c)| c.id() == id).map(|(i, _)| i);
-    if let Some(i) = found {
+    {
+        let p = paths();
+        let _lock = lock(&p);
+        let mut s = Store::load(&p);
+        let found = s.clips().find(|(_, c)| c.id() == id).map(|(i, _)| i);
+        let Some(i) = found else { return };
         s.modify(i, |o| {
             o.insert("archived".into(), Value::Bool(true));
         });
         s.save(&p);
     }
-}
-
-/// Types `text` into a Herdr pane without pressing Enter. `pane.send_input` bracket-pastes when
-/// the pane's program asked for it, so multi-line commands land whole instead of running line 1.
-fn herdr_send(pane: &str, text: &str) -> Result<(), String> {
-    let sock = std::env::var_os("HERDR_SOCKET_PATH").ok_or("HERDR_SOCKET_PATH is not set")?;
-    let mut s = UnixStream::connect(&sock).map_err(|e| format!("herdr socket: {e}"))?;
-    let _ = s.set_read_timeout(Some(Duration::from_secs(3)));
-    let req = json!({
-        "id": "agent-clip",
-        "method": "pane.send_input",
-        "params": {"pane_id": pane, "text": text, "keys": []},
-    });
-    writeln!(s, "{req}").map_err(|e| format!("herdr socket: {e}"))?;
-    let mut resp = String::new();
-    BufReader::new(&s)
-        .read_line(&mut resp)
-        .map_err(|e| format!("herdr socket: {e}"))?;
-    let v: Value = serde_json::from_str(&resp).map_err(|_| format!("herdr: bad reply {resp:?}"))?;
-    match v.get("error") {
-        Some(e) => Err(format!(
-            "herdr: {}",
-            e.get("message").and_then(Value::as_str).unwrap_or("send failed")
-        )),
-        None => Ok(()),
-    }
-}
-
-/// Target pane and project folder from the context Herdr hands plugin commands.
-fn herdr_context() -> (Option<String>, Option<PathBuf>) {
-    let ctx: Value = std::env::var("HERDR_PLUGIN_CONTEXT_JSON")
-        .ok()
-        .and_then(|s| serde_json::from_str(&s).ok())
-        .unwrap_or(Value::Null);
-    let str_of = |k: &str| {
-        ctx.get(k)
-            .and_then(Value::as_str)
-            .filter(|s| !s.is_empty())
-            .map(String::from)
-    };
-    let own = std::env::var("HERDR_PANE_ID").ok();
-    let pane = str_of("focused_pane_id").filter(|p| Some(p) != own.as_ref());
-    let cwd = str_of("focused_pane_cwd")
-        .or_else(|| str_of("workspace_cwd"))
-        .map(PathBuf::from);
-    (pane, cwd)
+    let _ = herdr::sync();
 }
 
 // MARK: - Command
@@ -505,7 +465,15 @@ pub fn cmd_pick(args: &[String]) {
         false,
     );
     a.max_pos(0);
-    let (ctx_pane, ctx_cwd) = if a.flag("herdr") { herdr_context() } else { (None, None) };
+    let (ctx_pane, ctx_cwd) = if a.flag("herdr") {
+        herdr::context()
+    } else {
+        (None, None)
+    };
+    // Run from the target pane's folder so herdr files the docked panel under that project.
+    if let Some(dir) = &ctx_cwd {
+        let _ = std::env::set_current_dir(dir);
+    }
     let to_pane = a.val("to-pane").map(String::from).or(ctx_pane);
     let keep = a.flag("keep") && to_pane.is_some();
     let home = a.val("project").map(String::from).or_else(|| {
@@ -633,7 +601,7 @@ pub fn cmd_pick(args: &[String]) {
                             chosen = Some(text);
                             break 'run;
                         }
-                        Some(pane) => match herdr_send(pane, &text) {
+                        Some(pane) => match herdr::send(pane, &text) {
                             Ok(()) if keep => status = Some((format!("inserted #{id} into {pane}"), Instant::now())),
                             Ok(()) => break 'run,
                             Err(e) => status = Some((e, Instant::now())),

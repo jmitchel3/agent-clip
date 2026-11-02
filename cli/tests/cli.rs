@@ -17,6 +17,9 @@ impl Store {
         let mut child = Command::new(env!("CARGO_BIN_EXE_agent-clip"))
             .args(args)
             .env("AGENT_CLIP_DIR", &self.0)
+            // Keep herdr-sync away from any real herdr session.
+            .env("XDG_CONFIG_HOME", &self.0)
+            .env_remove("HERDR_SOCKET_PATH")
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())

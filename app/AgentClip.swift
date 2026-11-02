@@ -53,6 +53,24 @@ func saveLines(_ lines: [StoreLine]) {
     let tmp = storeDir.appendingPathComponent("clips.tmp")
     guard (try? text.write(to: tmp, atomically: false, encoding: .utf8)) != nil else { return }
     _ = rename(tmp.path, storeURL.path)
+    syncHerdr()
+}
+
+/// Refreshes herdr's per-space `$clips` sidebar count after the app's own writes (the CLI does
+/// this after its writes). Skipped when no herdr session is listening on its default socket.
+func syncHerdr() {
+    let home = FileManager.default.homeDirectoryForCurrentUser
+    let config = ProcessInfo.processInfo.environment["XDG_CONFIG_HOME"].map { URL(fileURLWithPath: $0) }
+        ?? home.appendingPathComponent(".config")
+    let cli = home.appendingPathComponent(".local/bin/agent-clip")
+    guard FileManager.default.fileExists(atPath: config.appendingPathComponent("herdr/herdr.sock").path),
+          FileManager.default.isExecutableFile(atPath: cli.path) else { return }
+    let p = Process()
+    p.executableURL = cli
+    p.arguments = ["herdr-sync"]
+    p.standardOutput = FileHandle.nullDevice
+    p.standardError = FileHandle.nullDevice
+    try? p.run()
 }
 
 /// Load, mutate the clips with these ids, and save, all under the shared lock. Only lines that

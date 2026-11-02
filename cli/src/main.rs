@@ -20,9 +20,10 @@ use std::path::{Path, PathBuf};
 use std::process::{exit, Command, Stdio};
 use std::time::{SystemTime, UNIX_EPOCH};
 
+mod herdr;
 mod pick;
 
-const USAGE: &str = "usage: agent-clip {add,list,ls,show,copy,pull,pick,archive,projects,stats} ...
+const USAGE: &str = "usage: agent-clip {add,list,ls,show,copy,pull,pick,archive,projects,stats,herdr-sync} ...
 
 Shared clipboard of shell commands that AI agents hand to the user.
 
@@ -40,7 +41,9 @@ Shared clipboard of shell commands that AI agents hand to the user.
                          hide clips from the menu (kept in the log)
   projects [-a]          list projects with clip counts
   stats [-p PROJECT] [-d DAYS] [-t TOP]
-                         frequent commands: alias / tooling candidates";
+                         frequent commands: alias / tooling candidates
+  herdr-sync             publish pending counts per herdr space ($clips token);
+                         runs automatically after writes";
 
 fn die(msg: &str) -> ! {
     eprintln!("agent-clip: {msg}");
@@ -972,7 +975,12 @@ fn main() {
         "archive" => cmd_archive(rest),
         "projects" => cmd_projects(rest),
         "stats" => cmd_stats(rest),
+        "herdr-sync" => herdr::cmd_sync(rest),
         "-h" | "--help" => println!("{USAGE}"),
         other => usage_error(&format!("argument action: invalid choice: '{other}'")),
+    }
+    // Writers refresh herdr's sidebar counts once the store lock is released.
+    if matches!(action.as_str(), "add" | "copy" | "pull" | "archive") {
+        let _ = herdr::sync();
     }
 }

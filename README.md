@@ -63,6 +63,15 @@ command = "agent-clipboard.panel"    # docked split that stays open
 
 The docked panel types into the pane that was focused when you opened it, and updates live as agents queue commands. Keys: `↩` insert, `⌥↩` or `^x` archive, `^y` copy instead, `tab` / `←` `→` switch project, `esc` close the popup (clear the search in the panel), `^c` close. Without the keybindings, run `herdr plugin action invoke agent-clipboard.pick`.
 
+To show how many commands are waiting in each space, add the `$clips` token to the sidebar rows:
+
+```toml
+[ui.sidebar.spaces]
+rows = [["state_icon", "workspace", "$clips"], ["branch", "git_status"]]
+```
+
+A space counts the uncopied commands for every project open in its panes. The count refreshes whenever a command is queued, copied or archived (from the CLI, the picker or the menu bar app) and when panes, tabs or spaces open or change focus. `agent-clip herdr-sync` refreshes it by hand.
+
 `agent-clip pick` also works on its own in any terminal: it prints the chosen command, so `cmd=$(agent-clip pick)` works.
 
 ## Install
