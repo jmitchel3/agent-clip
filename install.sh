@@ -67,3 +67,8 @@ for _ in 1 2 3 4 5 6 7 8 9 10; do
 done
 launchctl print "gui/$(id -u)/$LABEL" >/dev/null
 echo "installed: $APP, $BIN_DIR/agent-clip"
+
+# Herdr users get the in-terminal picker and panel as a plugin (linked to this checkout).
+if command -v herdr >/dev/null; then
+  herdr plugin link "$ROOT/herdr" >/dev/null && echo "linked herdr plugin: agent-clipboard"
+fi

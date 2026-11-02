@@ -1,0 +1,34 @@
+id = "agent-clipboard"
+name = "Agent Clipboard"
+version = "0.1.0"
+min_herdr_version = "0.7.4"
+description = "Pick a command your agents queued and type it into the focused pane"
+platforms = ["macos"]
+
+[[actions]]
+id = "pick"
+title = "Insert a queued command"
+contexts = ["workspace", "tab", "pane"]
+command = ["sh", "open.sh", "picker"]
+
+[[actions]]
+id = "panel"
+title = "Dock the agent clipboard panel"
+contexts = ["workspace", "tab", "pane"]
+command = ["sh", "open.sh", "panel"]
+
+# Popup over the layout; closes after ↩.
+[[panes]]
+id = "picker"
+title = "Agent Clipboard"
+placement = "popup"
+width = "80%"
+height = "70%"
+command = ["sh", "pick.sh"]
+
+# Docked split that stays open; ↩ types into the pane that was focused when it opened.
+[[panes]]
+id = "panel"
+title = "clips"
+placement = "split"
+command = ["sh", "pick.sh", "--keep"]

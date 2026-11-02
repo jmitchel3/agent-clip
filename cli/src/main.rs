@@ -20,7 +20,9 @@ use std::path::{Path, PathBuf};
 use std::process::{exit, Command, Stdio};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-const USAGE: &str = "usage: agent-clip {add,list,ls,show,copy,pull,archive,projects,stats} ...
+mod pick;
+
+const USAGE: &str = "usage: agent-clip {add,list,ls,show,copy,pull,pick,archive,projects,stats} ...
 
 Shared clipboard of shell commands that AI agents hand to the user.
 
@@ -31,6 +33,9 @@ Shared clipboard of shell commands that AI agents hand to the user.
   show ID                print a clip's full command
   copy [ID] [-p PROJECT] copy a clip to the macOS clipboard (default: latest)
   pull [ID] [-p PROJECT] print newest uncopied clip for this project (used by `ac`)
+  pick [-p PROJECT] [--cwd DIR] [--to-pane ID [--keep]] [--herdr]
+                         terminal picker; prints the chosen command, or types it
+                         into a Herdr pane (--herdr reads the plugin context)
   archive [IDS...] [-p PROJECT] [--copied]
                          hide clips from the menu (kept in the log)
   projects [-a]          list projects with clip counts
@@ -963,6 +968,7 @@ fn main() {
         "show" => cmd_show(rest),
         "copy" => cmd_copy(rest),
         "pull" => cmd_pull(rest),
+        "pick" => pick::cmd_pick(rest),
         "archive" => cmd_archive(rest),
         "projects" => cmd_projects(rest),
         "stats" => cmd_stats(rest),
