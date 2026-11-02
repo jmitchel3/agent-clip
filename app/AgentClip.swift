@@ -759,6 +759,8 @@ final class ToastController {
     let model = ToastModel()
     let panel = FloatingPanel(focusable: false)
     var onClick: (() -> Void)?
+    /// Called when the user closes the toast with ✕.
+    var onDismiss: (() -> Void)?
     /// Clip a pending toast is offering, so it can close once that clip is copied elsewhere.
     var clipID: Int?
     private var host: ClickThroughHostingView<AnyView>?
@@ -866,6 +868,7 @@ final class ToastController {
 
     /// Breaks the toast into glass shards that burst away from the ✕ and fall.
     func shatter() {
+        onDismiss?()
         guard panel.isVisible, let host, let image = snapshot(host) else { hide(); return }
         let size = host.bounds.size
         let pad: CGFloat = 260
@@ -1006,6 +1009,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }()
     var pickerLoaded = false
     let toast = ToastController()
+    /// Clips waiting for a toast, oldest first; the toast offers the head.
+    var toastQueue: [Int] = []
+    /// Pending hand-off from a copied toast to the next queued clip.
+    var advanceWork: DispatchWorkItem?
     var watcher: StoreWatcher?
     var lastSeenID = 0
     var badgeCount = -1
@@ -1056,6 +1063,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         lastSeenID = store.rows.map(\.id).max() ?? 0
         refreshBadge()
         watcher = StoreWatcher { [weak self] in self?.storeChanged() }
+        // ✕ dismisses the whole burst, not just the clip on screen.
+        toast.onDismiss = { [weak self] in
+            self?.toastQueue.removeAll()
+            self?.advanceWork?.cancel()
+            self?.advanceWork = nil
+        }
         NSWorkspace.shared.notificationCenter.addObserver(
             forName: NSWorkspace.didActivateApplicationNotification, object: nil, queue: .main
         ) { [weak self] _ in
@@ -1078,15 +1091,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         refreshBadge()
         if pickerLoaded, picker.isVisible { picker.model.load(rows.reversed()) }
         // Archived clips drop out of `rows`, so a missing clip counts as handled too.
-        if let id = toast.clipID, !rows.contains(where: { $0.id == id && !$0.copied }) {
-            toast.hide()
+        let pending = Set(rows.lazy.filter { !$0.copied }.map(\.id))
+        let before = toastQueue
+        toastQueue.removeAll { !pending.contains($0) }
+        if toastsEnabled { toastQueue += fresh.lazy.filter { !$0.copied }.map(\.id) }
+        if toastQueue != before { showNextToast() }
+    }
+
+    /// Offers the oldest unhandled clip, so a burst from one session reads in the order it was queued.
+    func showNextToast() {
+        // A copied toast is on screen and will hand over to the next clip itself.
+        guard advanceWork == nil else { return }
+        guard let id = toastQueue.first, let row = store.rows.first(where: { $0.id == id }) else {
+            if toast.clipID != nil { toast.hide() }
+            return
         }
-        if toastsEnabled, let row = fresh.last {
-            let more = fresh.count > 1 ? "  (+\(fresh.count - 1) more)" : ""
-            toast.show(.pending, title: "\(row.project) · #\(row.id)\(more)", cmd: row.cmd, note: row.note,
-                       footer: "Click to copy  ·  ⌘⇧C picker  ·  ⌃⌥C copy newest", clipID: row.id) { [weak self] in
-                if let cmd = copyClip(id: row.id) { self?.confirmCopy(row.id, cmd) }
-            }
+        let more = toastQueue.count > 1 ? "  (+\(toastQueue.count - 1) more)" : ""
+        toast.show(.pending, title: "\(row.project) · #\(row.id)\(more)", cmd: row.cmd, note: row.note,
+                   footer: "Click to copy  ·  ⌘⇧C picker  ·  ⌃⌥C copy newest", clipID: row.id) { [weak self] in
+            if let cmd = copyClip(id: row.id) { self?.confirmCopy(row.id, cmd) }
         }
     }
 
@@ -1103,10 +1126,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         refreshBadge()
         let row = store.rows.first { $0.id == id }
         let project = row.map { " · \($0.project)" } ?? ""
+        toastQueue.removeAll { $0 == id }
+        let next = toastQueue.isEmpty ? "Click to copy again" : "Click to copy again  ·  next clip in a moment"
         toast.show(.copied, title: "Copied #\(id)\(project)", cmd: cmd, note: row?.note ?? "",
-                   footer: "Click to copy again") { [weak self] in
+                   footer: next) { [weak self] in
             if let cmd = copyClip(id: id) { self?.confirmCopy(id, cmd) }
         }
+        // Show the green confirmation briefly, then move on to the next queued clip.
+        advanceWork?.cancel()
+        advanceWork = nil
+        guard !toastQueue.isEmpty else { return }
+        let work = DispatchWorkItem { [weak self] in
+            self?.advanceWork = nil
+            self?.showNextToast()
+        }
+        advanceWork = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.2, execute: work)
     }
 
     /// Left click opens the picker; right or ⌃-click shows the settings menu.
@@ -1244,7 +1279,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     @objc func openPicker() { DispatchQueue.main.async { self.togglePicker() } }
     @objc func copyNewestAction() { copyNewest() }
-    @objc func toggleToasts() { toastsEnabled.toggle() }
+    @objc func toggleToasts() {
+        toastsEnabled.toggle()
+        if !toastsEnabled { toastQueue.removeAll() }
+    }
 
     func archive(_ ids: Set<Int>) {
         guard !ids.isEmpty else { return }
