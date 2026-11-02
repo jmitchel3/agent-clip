@@ -125,6 +125,7 @@ agent-clip pull [12]                  # print and mark used (what `ac` calls)
 agent-clip pick [-p project]          # terminal picker; prints the chosen command
 agent-clip archive [ids] [--copied]   # hide from the menu, keep in the log
 agent-clip projects                   # projects with clip counts
+agent-clip mv-project old new         # retag clips after renaming a repo
 agent-clip stats [-p project] [-d 7]  # what you run most
 ```
 

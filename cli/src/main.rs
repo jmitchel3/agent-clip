@@ -23,7 +23,8 @@ use std::time::{SystemTime, UNIX_EPOCH};
 mod herdr;
 mod pick;
 
-const USAGE: &str = "usage: agent-clip {add,list,ls,show,copy,pull,pick,archive,projects,stats,herdr-sync} ...
+const USAGE: &str =
+    "usage: agent-clip {add,list,ls,show,copy,pull,pick,archive,mv-project,projects,stats,herdr-sync} ...
 
 Shared clipboard of shell commands that AI agents hand to the user.
 
@@ -39,6 +40,7 @@ Shared clipboard of shell commands that AI agents hand to the user.
                          into a Herdr pane (--herdr reads the plugin context)
   archive [IDS...] [-p PROJECT] [--copied]
                          hide clips from the menu (kept in the log)
+  mv-project OLD NEW     retag clips after a repo rename (archived ones too)
   projects [-a]          list projects with clip counts
   stats [-p PROJECT] [-d DAYS] [-t TOP]
                          frequent commands: alias / tooling candidates
@@ -869,6 +871,31 @@ fn cmd_archive(args: &[String]) {
     emit(&format!("archived {} clip(s)\n", targets.len()));
 }
 
+/// Retag every clip (archived ones too, so stats stay grouped) after a repo rename.
+fn cmd_mv_project(args: &[String]) {
+    let a = parse(args, &[], false);
+    a.max_pos(2);
+    let [old, new] = [0, 1].map(|i| {
+        a.pos
+            .get(i)
+            .cloned()
+            .unwrap_or_else(|| usage_error("the following arguments are required: old, new"))
+    });
+    let p = paths();
+    let _lock = lock(&p);
+    let mut s = Store::load(&p);
+    let hits: Vec<usize> = s.clips().filter(|(_, c)| c.project() == old).map(|(i, _)| i).collect();
+    for &i in &hits {
+        s.modify(i, |o| {
+            o.insert("project".into(), Value::String(new.clone()));
+        });
+    }
+    if !hits.is_empty() {
+        s.save(&p);
+    }
+    emit(&format!("moved {} clip(s) from {old} to {new}\n", hits.len()));
+}
+
 fn cmd_projects(args: &[String]) {
     let a = parse(args, &[("a", "all", false)], false);
     a.max_pos(0);
@@ -973,6 +1000,7 @@ fn main() {
         "pull" => cmd_pull(rest),
         "pick" => pick::cmd_pick(rest),
         "archive" => cmd_archive(rest),
+        "mv-project" => cmd_mv_project(rest),
         "projects" => cmd_projects(rest),
         "stats" => cmd_stats(rest),
         "herdr-sync" => herdr::cmd_sync(rest),
@@ -980,7 +1008,7 @@ fn main() {
         other => usage_error(&format!("argument action: invalid choice: '{other}'")),
     }
     // Writers refresh herdr's sidebar counts once the store lock is released.
-    if matches!(action.as_str(), "add" | "copy" | "pull" | "archive") {
+    if matches!(action.as_str(), "add" | "copy" | "pull" | "archive" | "mv-project") {
         let _ = herdr::sync();
     }
 }

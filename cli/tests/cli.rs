@@ -121,3 +121,20 @@ fn stats_groups_shapes() {
         "{out}"
     );
 }
+
+#[test]
+fn mv_project_retags_all_clips() {
+    let s = Store::new("mv");
+    s.out(&["add", "-p", "old"], "one");
+    s.out(&["add", "-p", "old"], "two");
+    s.out(&["add", "-p", "keep"], "three");
+    s.out(&["archive", "1"], "");
+    assert_eq!(
+        s.out(&["mv-project", "old", "new"], ""),
+        "moved 2 clip(s) from old to new\n"
+    );
+    assert!(s.out(&["ls", "-a", "-p", "new"], "").contains("#1"));
+    assert_eq!(s.out(&["ls", "-a", "-p", "old"], ""), "");
+    assert!(s.out(&["ls", "-p", "keep"], "").contains("three"));
+    assert_eq!(s.run(&["mv-project", "old"], "").status.code(), Some(2));
+}
