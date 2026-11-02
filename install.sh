@@ -3,18 +3,26 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")" && pwd)"
-APP="$HOME/Applications/Agent Clipboard.app"
+APP="$HOME/Applications/Agent Clip.app"
 BIN_DIR="$HOME/.local/bin"
-LABEL="com.agent-clipboard"
+LABEL="com.agent-clip"
 PLIST="$HOME/Library/LaunchAgents/$LABEL.plist"
 
-mkdir -p "$APP/Contents/MacOS" "$BIN_DIR" "$HOME/Library/LaunchAgents" "$HOME/.agent-clipboard"
+# Migrate an install from when this was called agent-clipboard: stop and remove the old app, keep the clip history.
+OLD_LABEL="com.agent-clipboard"
+launchctl bootout "gui/$(id -u)/$OLD_LABEL" 2>/dev/null || true
+rm -rf "$HOME/Library/LaunchAgents/$OLD_LABEL.plist" "$HOME/Applications/Agent Clipboard.app"
+if [ -d "$HOME/.agent-clipboard" ] && [ ! -e "$HOME/.agent-clip" ]; then
+  mv "$HOME/.agent-clipboard" "$HOME/.agent-clip"
+fi
+
+mkdir -p "$APP/Contents/MacOS" "$BIN_DIR" "$HOME/Library/LaunchAgents" "$HOME/.agent-clip"
 
 command -v cargo >/dev/null || { echo "install.sh: Rust is required (brew install rust)" >&2; exit 1; }
 cargo build --release --quiet --manifest-path "$ROOT/cli/Cargo.toml"
 
-swiftc -O -o "$APP/Contents/MacOS/AgentClipboard" "$ROOT/app/AgentClipboard.swift"
-strip -x "$APP/Contents/MacOS/AgentClipboard"
+swiftc -O -o "$APP/Contents/MacOS/AgentClip" "$ROOT/app/AgentClip.swift"
+strip -x "$APP/Contents/MacOS/AgentClip"
 
 cat > "$APP/Contents/Info.plist" <<EOF
 <?xml version="1.0" encoding="UTF-8"?>
@@ -22,8 +30,8 @@ cat > "$APP/Contents/Info.plist" <<EOF
 <plist version="1.0">
 <dict>
   <key>CFBundleIdentifier</key><string>$LABEL</string>
-  <key>CFBundleName</key><string>Agent Clipboard</string>
-  <key>CFBundleExecutable</key><string>AgentClipboard</string>
+  <key>CFBundleName</key><string>Agent Clip</string>
+  <key>CFBundleExecutable</key><string>AgentClip</string>
   <key>CFBundlePackageType</key><string>APPL</string>
   <key>CFBundleShortVersionString</key><string>0.1</string>
   <key>LSUIElement</key><true/>
@@ -44,7 +52,7 @@ cat > "$PLIST" <<EOF
 <plist version="1.0">
 <dict>
   <key>Label</key><string>$LABEL</string>
-  <key>ProgramArguments</key><array><string>$APP/Contents/MacOS/AgentClipboard</string></array>
+  <key>ProgramArguments</key><array><string>$APP/Contents/MacOS/AgentClip</string></array>
   <key>RunAtLoad</key><true/>
   <key>KeepAlive</key><dict><key>SuccessfulExit</key><false/></dict>
 </dict>

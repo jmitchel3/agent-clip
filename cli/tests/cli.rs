@@ -16,7 +16,7 @@ impl Store {
     fn run(&self, args: &[&str], stdin: &str) -> Output {
         let mut child = Command::new(env!("CARGO_BIN_EXE_agent-clip"))
             .args(args)
-            .env("AGENT_CLIPBOARD_DIR", &self.0)
+            .env("AGENT_CLIP_DIR", &self.0)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())

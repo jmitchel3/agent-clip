@@ -4,7 +4,7 @@
 //! Nothing is ever deleted: archiving hides an entry from the menu but keeps it in the log,
 //! so `agent-clip stats` can surface commands worth turning into aliases or tools.
 //!
-//! Store: $AGENT_CLIPBOARD_DIR/clips.jsonl (default ~/.agent-clipboard), one JSON object per line.
+//! Store: $AGENT_CLIP_DIR/clips.jsonl (default ~/.agent-clip), one JSON object per line.
 //! `add` appends a line; every other write rewrites the file atomically under the shared flock.
 //! Lines that do not parse are written back verbatim, never dropped.
 
@@ -67,9 +67,9 @@ struct Paths {
 }
 
 fn paths() -> Paths {
-    let dir = std::env::var_os("AGENT_CLIPBOARD_DIR")
+    let dir = std::env::var_os("AGENT_CLIP_DIR")
         .map(PathBuf::from)
-        .unwrap_or_else(|| PathBuf::from(std::env::var_os("HOME").unwrap_or_default()).join(".agent-clipboard"));
+        .unwrap_or_else(|| PathBuf::from(std::env::var_os("HOME").unwrap_or_default()).join(".agent-clip"));
     Paths {
         store: dir.join("clips.jsonl"),
         dir,

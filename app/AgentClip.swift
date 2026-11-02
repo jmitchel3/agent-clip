@@ -1,6 +1,6 @@
-// Agent Clipboard: menu bar list of commands AI agents queued via `agent-clip add`.
+// Agent Clip: menu bar list of commands AI agents queued via `agent-clip add`.
 // Click the icon (or ⌘⇧C) for the picker; right-click for settings. ⌃⌥C copies the newest command,
-// and a toast appears whenever an agent queues something. Shares ~/.agent-clipboard/clips.jsonl
+// and a toast appears whenever an agent queues something. Shares ~/.agent-clip/clips.jsonl
 // (and its flock) with the agent-clip CLI.
 
 import AppKit
@@ -9,8 +9,8 @@ import Carbon.HIToolbox
 import SwiftUI
 
 let storeDir: URL = {
-    if let d = ProcessInfo.processInfo.environment["AGENT_CLIPBOARD_DIR"] { return URL(fileURLWithPath: d) }
-    return FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".agent-clipboard")
+    if let d = ProcessInfo.processInfo.environment["AGENT_CLIP_DIR"] { return URL(fileURLWithPath: d) }
+    return FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".agent-clip")
 }()
 let storeURL = storeDir.appendingPathComponent("clips.jsonl")
 let lockURL = storeDir.appendingPathComponent(".lock")
@@ -991,8 +991,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     var watcher: StoreWatcher?
     var lastSeenID = 0
     var badgeCount = -1
-    let badgeImages = (empty: NSImage(systemSymbolName: "doc.on.clipboard", accessibilityDescription: "Agent Clipboard"),
-                       full: NSImage(systemSymbolName: "doc.on.clipboard.fill", accessibilityDescription: "Agent Clipboard"))
+    let badgeImages = (empty: NSImage(systemSymbolName: "doc.on.clipboard", accessibilityDescription: "Agent Clip"),
+                       full: NSImage(systemSymbolName: "doc.on.clipboard.fill", accessibilityDescription: "Agent Clip"))
     /// Project of the front terminal tab, resolved when the menu opens or Terminal is activated.
     var activeProject: String?
     var filterSetting: String {
@@ -1205,7 +1205,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         addAction("Archive all shown", #selector(archiveAllShown))
         addAction("Open log file", #selector(openLog))
         menu.addItem(.separator())
-        addAction("Quit Agent Clipboard", #selector(quit))
+        addAction("Quit Agent Clip", #selector(quit))
     }
 
     func addAction(_ title: String, _ sel: Selector) {
