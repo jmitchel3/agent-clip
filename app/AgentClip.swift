@@ -59,18 +59,23 @@ func saveLines(_ lines: [StoreLine]) {
 /// Refreshes herdr's per-space `$clips` sidebar count after the app's own writes (the CLI does
 /// this after its writes). Skipped when no herdr session is listening on its default socket.
 func syncHerdr() {
-    let home = FileManager.default.homeDirectoryForCurrentUser
     let config = ProcessInfo.processInfo.environment["XDG_CONFIG_HOME"].map { URL(fileURLWithPath: $0) }
-        ?? home.appendingPathComponent(".config")
-    let cli = home.appendingPathComponent(".local/bin/agent-clip")
-    guard FileManager.default.fileExists(atPath: config.appendingPathComponent("herdr/herdr.sock").path),
-          FileManager.default.isExecutableFile(atPath: cli.path) else { return }
+        ?? FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".config")
+    guard FileManager.default.fileExists(atPath: config.appendingPathComponent("herdr/herdr.sock").path) else { return }
+    try? cliProcess(["herdr-sync"])?.run()
+}
+
+let cliURL = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".local/bin/agent-clip")
+
+/// The agent-clip CLI with output discarded, or nil if it isn't installed.
+func cliProcess(_ args: [String]) -> Process? {
+    guard FileManager.default.isExecutableFile(atPath: cliURL.path) else { return nil }
     let p = Process()
-    p.executableURL = cli
-    p.arguments = ["herdr-sync"]
+    p.executableURL = cliURL
+    p.arguments = args
     p.standardOutput = FileHandle.nullDevice
     p.standardError = FileHandle.nullDevice
-    try? p.run()
+    return p
 }
 
 /// Load, mutate the clips with these ids, and save, all under the shared lock. Only lines that
@@ -265,6 +270,156 @@ func shellDirectory(onTTY tty: String) -> String? {
     }
 }
 
+// MARK: - Jump to the agent's terminal
+
+func bsdInfo(_ pid: pid_t) -> proc_bsdinfo? {
+    var info = proc_bsdinfo()
+    let size = Int32(MemoryLayout<proc_bsdinfo>.size)
+    return proc_pidinfo(pid, PROC_PIDTBSDINFO, 0, &info, size) == size ? info : nil
+}
+
+/// The app showing a tty: walks up from a process on it to the first regular app (shell → login → app).
+func hostApp(ofTTY tty: String) -> NSRunningApplication? {
+    var st = stat()
+    guard stat(tty, &st) == 0 else { return nil }
+    var pids = [pid_t](repeating: 0, count: 256)
+    let bytes = proc_listpids(UInt32(PROC_TTY_ONLY), UInt32(st.st_rdev), &pids, Int32(pids.count * MemoryLayout<pid_t>.size))
+    guard bytes > 0 else { return nil }
+    for start in pids.prefix(Int(bytes) / MemoryLayout<pid_t>.size) where start > 0 {
+        var pid = start
+        for _ in 0..<32 {
+            if let app = NSRunningApplication(processIdentifier: pid), app.activationPolicy == .regular { return app }
+            guard let info = bsdInfo(pid), info.pbi_ppid > 1 else { break }
+            pid = pid_t(info.pbi_ppid)
+        }
+    }
+    return nil
+}
+
+/// tty of a herdr client shown in some terminal app (the server runs detached, without one).
+func herdrClientTTY() -> String? {
+    var pids = [pid_t](repeating: 0, count: Int(proc_listallpids(nil, 0)) + 64)
+    let n = proc_listallpids(&pids, Int32(pids.count * MemoryLayout<pid_t>.size))
+    for pid in pids.prefix(max(0, Int(n))) where pid > 0 {
+        var name = [CChar](repeating: 0, count: 256)
+        proc_name(pid, &name, UInt32(name.count))
+        guard String(cString: name) == "herdr", let info = bsdInfo(pid), info.e_tdev != UInt32.max, info.e_tdev != 0,
+              let dev = devname(dev_t(bitPattern: info.e_tdev), mode_t(S_IFCHR)) else { continue }
+        let tty = "/dev/" + String(cString: dev)
+        if hostApp(ofTTY: tty) != nil { return tty }
+    }
+    return nil
+}
+
+func appleScriptString(_ s: String) -> String {
+    "\"" + s.replacingOccurrences(of: "\\", with: "\\\\").replacingOccurrences(of: "\"", with: "\\\"") + "\""
+}
+
+@discardableResult
+func runAppleScript(_ source: String) -> NSAppleEventDescriptor? {
+    var error: NSDictionary?
+    return NSAppleScript(source: source)?.executeAndReturnError(&error)
+}
+
+/// Ghostty doesn't expose ttys, so pick the terminal whose directory best matches the agent's:
+/// the same folder, else its closest parent, else any folder in the same project.
+func ghosttyTerminal(near cwd: String) -> String? {
+    guard let reply = runAppleScript("tell application \"Ghostty\" to get {id, working directory} of terminals"),
+          reply.numberOfItems == 2, let ids = reply.atIndex(1), let dirs = reply.atIndex(2) else { return nil }
+    let want = realPath(cwd)
+    let project = projectName(forDirectory: cwd)
+    var best: (score: Int, id: String)?
+    for i in stride(from: 1, through: min(ids.numberOfItems, dirs.numberOfItems), by: 1) {
+        guard let id = ids.atIndex(i)?.stringValue, var dir = dirs.atIndex(i)?.stringValue, !dir.isEmpty else { continue }
+        dir = realPath(dir)
+        let score = dir == want ? Int.max
+            : want.hasPrefix(dir.hasSuffix("/") ? dir : dir + "/") ? dir.count
+            : projectName(forDirectory: dir) == project ? 1 : 0
+        if score > 0, score > (best?.score ?? 0) { best = (score, id) }
+    }
+    return best?.id
+}
+
+/// Raises the window and tab showing `tty` in the app that hosts it. Main thread (NSAppleScript).
+func revealTerminal(tty: String, app: NSRunningApplication, cwd: String?) {
+    let target = appleScriptString(tty)
+    switch app.bundleIdentifier {
+    case "com.apple.Terminal":
+        runAppleScript("""
+        tell application "Terminal"
+          repeat with w in windows
+            repeat with t in tabs of w
+              if tty of t is \(target) then
+                set selected of t to true
+                set index of w to 1
+                return
+              end if
+            end repeat
+          end repeat
+        end tell
+        """)
+    case "com.googlecode.iterm2":
+        runAppleScript("""
+        tell application "iTerm2"
+          repeat with w in windows
+            repeat with t in tabs of w
+              repeat with s in sessions of t
+                if tty of s is \(target) then
+                  select w
+                  select t
+                  select s
+                  return
+                end if
+              end repeat
+            end repeat
+          end repeat
+        end tell
+        """)
+    case "com.mitchellh.ghostty":
+        if let cwd, let id = ghosttyTerminal(near: cwd) {
+            runAppleScript("tell application \"Ghostty\" to focus (first terminal whose id is \(appleScriptString(id)))")
+        }
+    default:
+        break
+    }
+    activate(app)
+}
+
+func activate(_ app: NSRunningApplication) {
+    guard let url = app.bundleURL else { return }
+    let config = NSWorkspace.OpenConfiguration()
+    config.activates = true
+    NSWorkspace.shared.openApplication(at: url, configuration: config)
+}
+
+/// Brings forward the session that queued a clip: its Herdr app terminal or herdr pane (through
+/// `agent-clip focus`), else its terminal tab.
+func jumpToOrigin(_ row: ClipRow) {
+    guard row.herdrPane != nil || row.hcTerminal != nil || row.tty != nil else { return }
+    DispatchQueue.global(qos: .userInitiated).async {
+        var tty = row.tty
+        var cwd: String? = row.cwd
+        if row.herdrPane != nil || row.hcTerminal != nil, let p = cliProcess(["focus", String(row.id)]) {
+            let out = Pipe()
+            p.standardOutput = out
+            if (try? p.run()) != nil {
+                let which = String(decoding: out.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+                p.waitUntilExit()
+                if p.terminationStatus == 0, which == "herdr-app",
+                   let app = NSRunningApplication.runningApplications(withBundleIdentifier: "dev.herdr.app").first {
+                    DispatchQueue.main.async { activate(app) }
+                    return
+                }
+                // herdr now shows the pane; raise whichever terminal the herdr client lives in.
+                if p.terminationStatus == 0, which == "herdr", let client = herdrClientTTY() { tty = client; cwd = nil }
+            }
+        }
+        guard let tty, let app = hostApp(ofTTY: tty) else { return }
+        DispatchQueue.main.async { revealTerminal(tty: tty, app: app, cwd: cwd) }
+    }
+}
+
 func preview(_ cmd: String, width: Int = 60) -> String {
     let lines = cmd.trimmingCharacters(in: .whitespacesAndNewlines).components(separatedBy: "\n")
     var line = lines.first ?? ""
@@ -299,6 +454,10 @@ struct ClipRow: Identifiable {
     let note: String
     let ts: Double
     let copies: Int
+    let cwd: String?
+    let tty: String?
+    let herdrPane: String?
+    let hcTerminal: String?
     var copied: Bool { copies > 0 }
 
     init(_ c: Clip) {
@@ -308,6 +467,10 @@ struct ClipRow: Identifiable {
         note = (c["note"] as? String) ?? ""
         ts = (c["ts"] as? NSNumber)?.doubleValue ?? 0
         copies = copyCount(c)
+        cwd = c["cwd"] as? String
+        tty = c["tty"] as? String
+        herdrPane = c["herdr_pane"] as? String
+        hcTerminal = c["hc_terminal"] as? String
     }
 
     var age: String {
@@ -1032,6 +1195,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         get { UserDefaults.standard.object(forKey: "toasts") as? Bool ?? true }
         set { UserDefaults.standard.set(newValue, forKey: "toasts") }
     }
+    var jumpEnabled: Bool {
+        get { UserDefaults.standard.object(forKey: "jumpToSession") as? Bool ?? true }
+        set { UserDefaults.standard.set(newValue, forKey: "jumpToSession") }
+    }
+
+    /// Toast click: copy, then bring forward the session that queued the clip.
+    func toastCopy(_ id: Int) {
+        guard let cmd = copyClip(id: id) else { return }
+        confirmCopy(id, cmd)
+        if jumpEnabled, let row = store.rows.first(where: { $0.id == id }) { jumpToOrigin(row) }
+    }
 
     func resolveActiveProject() {
         guard filterSetting == autoProject, let tty = frontTerminalTTY(), let dir = shellDirectory(onTTY: tty) else { return }
@@ -1109,7 +1283,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let more = toastQueue.count > 1 ? "  (+\(toastQueue.count - 1) more)" : ""
         toast.show(.pending, title: "\(row.project) · #\(row.id)\(more)", cmd: row.cmd, note: row.note,
                    footer: "Click to copy  ·  ⌘⇧C picker  ·  ⌃⌥C copy newest", clipID: row.id) { [weak self] in
-            if let cmd = copyClip(id: row.id) { self?.confirmCopy(row.id, cmd) }
+            self?.toastCopy(row.id)
         }
     }
 
@@ -1130,7 +1304,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let next = toastQueue.isEmpty ? "Click to copy again" : "Click to copy again  ·  next clip in a moment"
         toast.show(.copied, title: "Copied #\(id)\(project)", cmd: cmd, note: row?.note ?? "",
                    footer: next) { [weak self] in
-            if let cmd = copyClip(id: id) { self?.confirmCopy(id, cmd) }
+            self?.toastCopy(id)
         }
         // Show the green confirmation briefly, then move on to the next queued clip.
         advanceWork?.cancel()
@@ -1253,6 +1427,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         toastItem.target = self
         toastItem.state = toastsEnabled ? .on : .off
         menu.addItem(toastItem)
+        let jumpItem = NSMenuItem(title: "Toast click jumps to the agent's terminal", action: #selector(toggleJump), keyEquivalent: "")
+        jumpItem.target = self
+        jumpItem.state = jumpEnabled ? .on : .off
+        menu.addItem(jumpItem)
         menu.addItem(.separator())
         addAction("Archive copied", #selector(archiveCopied))
         addAction("Archive all shown", #selector(archiveAllShown))
@@ -1279,6 +1457,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     @objc func openPicker() { DispatchQueue.main.async { self.togglePicker() } }
     @objc func copyNewestAction() { copyNewest() }
+    @objc func toggleJump() { jumpEnabled.toggle() }
     @objc func toggleToasts() {
         toastsEnabled.toggle()
         if !toastsEnabled { toastQueue.removeAll() }

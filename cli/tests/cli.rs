@@ -20,6 +20,9 @@ impl Store {
             // Keep herdr-sync away from any real herdr session.
             .env("XDG_CONFIG_HOME", &self.0)
             .env_remove("HERDR_SOCKET_PATH")
+            // Don't tag test clips with this session's herdr pane or Herdr app terminal.
+            .env_remove("HERDR_PANE_ID")
+            .env_remove("HC_TERMINAL_ID")
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
@@ -137,4 +140,30 @@ fn mv_project_retags_all_clips() {
     assert_eq!(s.out(&["ls", "-a", "-p", "old"], ""), "");
     assert!(s.out(&["ls", "-p", "keep"], "").contains("three"));
     assert_eq!(s.run(&["mv-project", "old"], "").status.code(), Some(2));
+}
+
+#[test]
+fn add_records_origin_and_focus_needs_herdr() {
+    let s = Store::new("origin");
+    let mut child = Command::new(env!("CARGO_BIN_EXE_agent-clip"))
+        .args(["add", "--", "true"])
+        .env("AGENT_CLIP_DIR", &s.0)
+        .env("XDG_CONFIG_HOME", &s.0)
+        .env_remove("HERDR_SOCKET_PATH")
+        .env_remove("HC_TERMINAL_ID")
+        .env("HERDR_PANE_ID", "p7")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::null())
+        .spawn()
+        .unwrap();
+    drop(child.stdin.take());
+    assert!(child.wait().unwrap().success());
+    let clip: serde_json::Value = serde_json::from_str(&s.lines()[0]).unwrap();
+    assert_eq!(clip["herdr_pane"], "p7");
+    assert!(clip.get("hc_terminal").is_none());
+
+    s.out(&["add", "--", "false"], "");
+    let o = s.run(&["focus", "2"], "");
+    assert!(!o.status.success());
+    assert!(String::from_utf8_lossy(&o.stderr).contains("not queued from herdr"));
 }

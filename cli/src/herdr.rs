@@ -10,6 +10,7 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 use std::io::{BufRead, BufReader, Write};
 use std::os::unix::net::UnixStream;
 use std::path::{Path, PathBuf};
+use std::process::{Command, Stdio};
 use std::time::Duration;
 
 const SOURCE: &str = "agent-clip";
@@ -110,6 +111,73 @@ pub fn sync() -> Result<(), String> {
         )?;
     }
     Ok(())
+}
+
+/// Shows the session a clip was queued from: a Herdr app terminal, else a herdr pane (its space,
+/// its tab, then the pane). Returns which one it focused.
+pub fn focus(clip: &Value) -> Result<&'static str, String> {
+    if let Some(term) = clip["hc_terminal"].as_str() {
+        return focus_app(term).map(|_| "herdr-app");
+    }
+    let pane = clip["herdr_pane"].as_str().ok_or("clip was not queued from herdr")?;
+    let sock = clip["herdr_socket"]
+        .as_str()
+        .map(PathBuf::from)
+        .filter(|p| p.exists())
+        .or_else(socket)
+        .ok_or("herdr is not running")?;
+    let info = request(&sock, "pane.get", json!({"pane_id": pane}))?;
+    let info = info.get("pane").unwrap_or(&info);
+    if let Some(ws) = info["workspace_id"].as_str() {
+        request(&sock, "workspace.focus", json!({"workspace_id": ws}))?;
+    }
+    if let Some(tab) = info["tab_id"].as_str() {
+        request(&sock, "tab.focus", json!({"tab_id": tab}))?;
+    }
+    request(&sock, "pane.focus", json!({"pane_id": pane})).map(|_| "herdr")
+}
+
+/// `herdr-app do agent.focus` switches space and tab too; plain terminals take `pane.focus`.
+fn focus_app(term: &str) -> Result<(), String> {
+    let home = PathBuf::from(std::env::var_os("HOME").unwrap_or_default());
+    // The menu bar app runs this with launchd's bare PATH.
+    let bin = [
+        home.join(".local/bin/herdr-app"),
+        PathBuf::from("/Applications/Herdr.app/Contents/MacOS/herdr-app"),
+    ]
+    .into_iter()
+    .find(|p| p.exists())
+    .unwrap_or_else(|| PathBuf::from("herdr-app"));
+    let run = |cmd: &str| {
+        Command::new(&bin)
+            .args(["do", cmd, "--terminal", term])
+            .stdin(Stdio::null())
+            .output()
+            .map_err(|e| format!("herdr-app: {e}"))
+    };
+    let out = run("agent.focus")?;
+    if out.status.success() {
+        return Ok(());
+    }
+    let out = run("pane.focus")?;
+    if out.status.success() {
+        return Ok(());
+    }
+    Err(format!("herdr-app: {}", String::from_utf8_lossy(&out.stdout).trim()))
+}
+
+/// `agent-clip focus ID`: used by the menu bar app when a toast is clicked.
+pub fn cmd_focus(args: &[String]) {
+    let a = super::parse(args, &[], false);
+    a.max_pos(1);
+    let Some(id) = a.pos.first() else {
+        super::usage_error("the following arguments are required: id")
+    };
+    let s = Store::load(&paths());
+    match focus(&s.value(s.find(id))) {
+        Ok(which) => println!("{which}"),
+        Err(e) => super::die(&e),
+    }
 }
 
 /// `agent-clip herdr-sync`: errors go to stderr, but never fail the hook that called it.

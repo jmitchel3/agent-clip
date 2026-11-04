@@ -36,7 +36,7 @@ cat > "$APP/Contents/Info.plist" <<EOF
   <key>CFBundleShortVersionString</key><string>0.1</string>
   <key>LSUIElement</key><true/>
   <key>NSAppleEventsUsageDescription</key>
-  <string>Reads the front Terminal tab's directory to filter commands by project.</string>
+  <string>Reads the front Terminal tab's directory to filter commands by project, and brings the agent's terminal tab forward when you click a toast.</string>
 </dict>
 </plist>
 EOF

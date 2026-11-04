@@ -25,7 +25,7 @@ agent-clip gives every agent session one shared queue. Agents drop commands in. 
 
 | How | What happens |
 | --- | --- |
-| **Toast** | A card pops up top-right when an agent queues something and stays until you use it. Click it to copy: it turns green and slowly fades. Hover to hold it, click again to re-copy, or hit ✕ to shatter it. |
+| **Toast** | A card pops up top-right when an agent queues something and stays until you use it. Click it to copy: it turns green and slowly fades, and the terminal the agent runs in comes to the front (see below). Hover to hold it, click again to re-copy, or hit ✕ to shatter it. |
 | **⌘⇧C** or click the menu bar icon | A Spotlight-style picker. The newest command is preselected, so **⌘⇧C ↩** copies it. |
 | **⌃⌥C** | Copies the newest command you haven't copied yet for the current project. No UI. |
 | **`ac`** in your terminal | Puts the newest command for this folder onto your zsh prompt, ready to edit or run. No clipboard involved. `ac 12` loads clip #12. |
@@ -40,6 +40,19 @@ Inside the picker (each row shows its clip id, the `#12` agents tell you about):
 | `←` `→` / `tab` | switch project tab (arrows work while the search box is empty) |
 | type | search commands, notes and projects; `34` or `#34` jumps to clip #34 in any project |
 | `esc` | close |
+
+### Jump to the agent's terminal
+
+`agent-clip add` records where the agent runs, so clicking a toast also shows that session:
+
+| Agent runs in | What the click does |
+| --- | --- |
+| Herdr app | Shows the agent's terminal (`herdr-app do agent.focus`) and brings Herdr forward. |
+| herdr (terminal UI) | Focuses the space, tab and pane, then raises the terminal app showing herdr. |
+| Terminal.app, iTerm2 | Selects the tab running the agent (matched by tty) and raises its window. |
+| Ghostty | Ghostty doesn't expose ttys, so it focuses the terminal whose folder best matches the agent's. Two sessions in the same folder can pick the wrong one. |
+
+The first jump into each app asks to let Agent Clip control it. Turn it off with "Toast click jumps to the agent's terminal" in the right-click menu. `agent-clip focus ID` does the herdr part from a shell.
 
 Right-click the menu bar icon for settings: project filter, toast on/off, bulk archive, open the log.
 

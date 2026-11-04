@@ -24,7 +24,7 @@ mod herdr;
 mod pick;
 
 const USAGE: &str =
-    "usage: agent-clip {add,list,ls,show,copy,pull,pick,archive,mv-project,projects,stats,herdr-sync} ...
+    "usage: agent-clip {add,list,ls,show,copy,pull,pick,archive,mv-project,projects,stats,focus,herdr-sync} ...
 
 Shared clipboard of shell commands that AI agents hand to the user.
 
@@ -44,6 +44,8 @@ Shared clipboard of shell commands that AI agents hand to the user.
   projects [-a]          list projects with clip counts
   stats [-p PROJECT] [-d DAYS] [-t TOP]
                          frequent commands: alias / tooling candidates
+  focus ID               show the herdr pane (or Herdr app terminal) that queued a clip;
+                         prints which: herdr | herdr-app
   herdr-sync             publish pending counts per herdr space ($clips token);
                          runs automatically after writes";
 
@@ -301,6 +303,66 @@ fn detect_agent() -> &'static str {
         return "grok";
     }
     "unknown"
+}
+
+/// Where the queuing agent runs, so the app can bring that terminal forward: its herdr pane or
+/// Herdr app terminal, and
+/// the tty of the nearest ancestor that has one (agents run tool commands without a terminal).
+fn origin() -> Map<String, Value> {
+    let mut m = Map::new();
+    let env = |k: &str| std::env::var(k).ok().filter(|v| !v.is_empty());
+    if let Some(pane) = env("HERDR_PANE_ID") {
+        m.insert("herdr_pane".into(), pane.into());
+        if let Some(sock) = env("HERDR_SOCKET_PATH") {
+            m.insert("herdr_socket".into(), sock.into());
+        }
+    }
+    // Herdr's desktop app (herdr-core terminals).
+    if let Some(term) = env("HC_TERMINAL_ID") {
+        m.insert("hc_terminal".into(), term.into());
+    }
+    if let Some(tty) = ancestor_tty() {
+        m.insert("tty".into(), tty.into());
+    }
+    m
+}
+
+fn ancestor_tty() -> Option<String> {
+    extern "C" {
+        fn devname(dev: libc::dev_t, kind: libc::mode_t) -> *const libc::c_char;
+    }
+    let mut pid = std::process::id() as libc::c_int;
+    for _ in 0..64 {
+        let mut info: libc::proc_bsdinfo = unsafe { std::mem::zeroed() };
+        let size = std::mem::size_of::<libc::proc_bsdinfo>() as libc::c_int;
+        let got = unsafe {
+            libc::proc_pidinfo(
+                pid,
+                libc::PROC_PIDTBSDINFO,
+                0,
+                (&mut info as *mut libc::proc_bsdinfo).cast(),
+                size,
+            )
+        };
+        if got != size {
+            return None;
+        }
+        // NODEV (-1) means no controlling terminal.
+        if info.e_tdev != u32::MAX && info.e_tdev != 0 {
+            let name = unsafe { devname(info.e_tdev as libc::dev_t, libc::S_IFCHR) };
+            if !name.is_null() {
+                let name = unsafe { std::ffi::CStr::from_ptr(name) }.to_string_lossy();
+                if name != "??" {
+                    return Some(format!("/dev/{name}"));
+                }
+            }
+        }
+        if info.pbi_ppid <= 1 {
+            return None;
+        }
+        pid = info.pbi_ppid as libc::c_int;
+    }
+    None
 }
 
 fn pbcopy(text: &str) {
@@ -728,7 +790,7 @@ fn cmd_add(args: &[String]) {
         .val("agent")
         .filter(|s| !s.is_empty())
         .map_or_else(|| detect_agent().to_string(), String::from);
-    let clip = json!({
+    let mut clip = json!({
         "id": id,
         "ts": now(),
         "project": project,
@@ -739,6 +801,7 @@ fn cmd_add(args: &[String]) {
         "copies": [],
         "archived": false,
     });
+    clip.as_object_mut().unwrap().append(&mut origin());
     store.append(&p, &serde_json::to_string(&clip).unwrap());
     emit(&format!("agent-clip #{id} [{project}] {}\n", first_line(cmd, 70)));
 }
@@ -1004,6 +1067,7 @@ fn main() {
         "projects" => cmd_projects(rest),
         "stats" => cmd_stats(rest),
         "herdr-sync" => herdr::cmd_sync(rest),
+        "focus" => herdr::cmd_focus(rest),
         "-h" | "--help" => println!("{USAGE}"),
         other => usage_error(&format!("argument action: invalid choice: '{other}'")),
     }
